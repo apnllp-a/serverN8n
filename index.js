@@ -161,7 +161,7 @@ app.put('/api/repairs/admin/:id', async (req, res) => {
 
 app.put('/api/requisitions/approve/:id', async (req, res) => {
   try {
-    const { id } = req.params; // ID ของใบคำขอเบิก (Requisition ID)
+    const { id } = req.params;
 
     // 1. ค้นหาใบคำขอเบิกก่อน
     const reqDoc = await Requisition.findById(id);
@@ -174,10 +174,9 @@ app.put('/api/requisitions/approve/:id', async (req, res) => {
     await reqDoc.save();
 
     // 3. ตัดสต๊อกใน Inventory (ใช้ $inc เพื่อความแม่นยำ)
-    // หมายเหตุ: เราหาด้วย item_name หรือ item_id ตามที่พี่เก็บไว้
     const inventoryUpdate = await Inventory.findOneAndUpdate(
       { item_name: reqDoc.item_name },
-      { $inc: { stock_qty: -(Number(reqDoc.request_qty) || 1) } },
+      { $inc: { stock: -(Number(reqDoc.request_qty) || 1) } },
       { new: true }
     );
 
@@ -196,3 +195,5 @@ app.put('/api/requisitions/approve/:id', async (req, res) => {
 // 6. รัน Server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
+
