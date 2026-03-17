@@ -24,10 +24,13 @@ mongoose.connect(process.env.MONGODB_URI)
 // ขอบเขตงานซ่อม
 const RepairSchema = new mongoose.Schema({
   userId: String,
+  senderName: String,
   problem_details: String,
   status: { type: String, default: 'Pending' },
   reported_at: { type: Date, default: Date.now },
-  accepted_at: Date
+  accepted_at: Date,
+  completed_at: Date,
+  action_by: { type: String, default: 'Admin' }
 });
 const Repair = mongoose.model('Repair', RepairSchema);
 
@@ -119,14 +122,21 @@ app.delete('/api/inventory/:id', async (req, res) => {
 // อัปเดต Ticket แบบละเอียด (จากหน้า Dashboard)
 app.put('/api/repairs/admin/:id', async (req, res) => {
   try {
+    const { id } = req.params;
     const { status } = req.body;
-    const updateData = { status };
 
-    if (status === 'Resolved') {
-      updateData.completed_at = new Date();
-    }
+    let updateData = {
+      status: status,
+      action_by: 'Admin'
+    };
 
-    const updated = await Repair.findByIdAndUpdate(req.params.id, updateData, { new: true });
+    if (status === 'In Progress') updateData.accepted_at = new Date();
+    if (status === 'Resolved') updateData.completed_at = new Date();
+
+    const updated = await Repair.findByIdAndUpdate(id, updateData, { new: true });
+
+    if (!updated) return res.status(404).json({ success: false });
+
     res.json({ success: true, data: updated });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
