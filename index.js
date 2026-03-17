@@ -176,8 +176,8 @@ app.put('/api/requisitions/approve/:id', async (req, res) => {
     // 3. ตัดสต๊อกใน Inventory (ใช้ $inc เพื่อความแม่นยำ)
     // หมายเหตุ: เราหาด้วย item_name หรือ item_id ตามที่พี่เก็บไว้
     const inventoryUpdate = await Inventory.findOneAndUpdate(
-      { item_name: reqDoc.item_name }, // หรือ { _id: reqDoc.item_id }
-      { $inc: { stock_qty: -reqDoc.request_qty } }, // ลบจำนวนตามที่ขอ
+      { item_name: reqDoc.item_name },
+      { $inc: { stock_qty: -(Number(reqDoc.request_qty) || 1) } },
       { new: true }
     );
 
