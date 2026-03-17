@@ -38,7 +38,7 @@ const Repair = mongoose.model('Repair', RepairSchema);
 const InventorySchema = new mongoose.Schema({
   item_name: String,
   category: String,
-  stock_qty: Number,
+  stock: Number,
   unit: String, // เช่น อัน, กล่อง, ตัว
   updated_at: { type: Date, default: Date.now }
 });
