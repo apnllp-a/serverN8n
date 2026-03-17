@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>รายการแจ้งซ่อม</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+        .status-pending { color: orange; font-weight: bold; }
+        .status-progress { color: blue; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h1>📋 รายการแจ้งซ่อมทั้งหมด</h1>
+    <div id="loading">กำลังโหลดข้อมูล...</div>
+    <table id="repairTable">
+        <thead>
+            <tr>
+                <th>รหัสงาน</th>
+                <th>อาการเสีย</th>
+                <th>สถานะ</th>
+                <th>เวลาแจ้ง</th>
+            </tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+    </table>
+
+    <script>
+        // เปลี่ยน URL เป็นของ Railway ที่พี่ Deploy เสร็จแล้ว
+        const API_URL = 'http://localhost:3000/api/repairs';
+
+        async function loadRepairs() {
+            try {
+                const res = await fetch(API_URL);
+                const data = await res.json();
+                const body = document.getElementById('tableBody');
+                document.getElementById('loading').style.display = 'none';
+                
+                body.innerHTML = data.map(item => `
+                    <tr>
+                        <td>${item._id}</td>
+                        <td>${item.problem_details}</td>
+                        <td class="${item.status === 'Pending' ? 'status-pending' : 'status-progress'}">${item.status}</td>
+                        <td>${new Date(item.reported_at).toLocaleString()}</td>
+                    </tr>
+                `).join('');
+            } catch (err) {
+                console.error("Error:", err);
+            }
+        }
+        loadRepairs();
+    </script>
+</body>
+</html>
