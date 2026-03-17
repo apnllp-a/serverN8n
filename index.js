@@ -192,6 +192,10 @@ app.put('/api/requisitions/approve/:id', async (req, res) => {
   }
 });
 
+app.get('/api/requisitions', async (req, res) => {
+  const items = await Requisition.find().sort({ requested_at: -1 });
+  res.json(items);
+});
 // 6. รัน Server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
