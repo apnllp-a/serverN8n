@@ -42,14 +42,26 @@ app.post('/api/repairs', async (req, res) => {
 // C. อัปเดตสถานะ (n8n จะยิงมาที่นี่ขา #รับงาน)
 app.put('/api/repairs/:id', async (req, res) => {
   try {
+    const { id } = req.params;
+    const { status } = req.body;
     const updated = await Repair.findByIdAndUpdate(
-      req.params.id,
-      { status: 'In Progress', accepted_at: new Date() },
+      id,
+      {
+        status: status || 'In Progress',
+        accepted_at: new Date()
+      },
       { new: true }
     );
+
+    if (!updated) {
+      return res.status(404).json({ success: false, message: 'Ticket not found' });
+    }
+
+    console.log(`✅ Ticket ${id} updated to ${status}`);
     res.json({ success: true, data: updated });
   } catch (err) {
-    res.status(500).json({ error: 'Update Failed' });
+    console.error('❌ Update Error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
