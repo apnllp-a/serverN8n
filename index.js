@@ -116,6 +116,23 @@ app.delete('/api/inventory/:id', async (req, res) => {
   }
 });
 
+// อัปเดต Ticket แบบละเอียด (จากหน้า Dashboard)
+app.put('/api/repairs/admin/:id', async (req, res) => {
+  try {
+    const { status } = req.body;
+    const updateData = { status };
+
+    if (status === 'Resolved') {
+      updateData.completed_at = new Date();
+    }
+
+    const updated = await Repair.findByIdAndUpdate(req.params.id, updateData, { new: true });
+    res.json({ success: true, data: updated });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // 6. รัน Server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
