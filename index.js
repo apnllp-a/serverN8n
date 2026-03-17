@@ -34,16 +34,30 @@ const RepairSchema = new mongoose.Schema({
 });
 const Repair = mongoose.model('Repair', RepairSchema);
 
-// คลังอุปกรณ์ (ปรับตามหน้า UI พี่)
+// 1. คลังอุปกรณ์
 const InventorySchema = new mongoose.Schema({
-  id: String,       // รหัสอุปกรณ์ เช่น IT-001
-  name: String,     // ชื่ออุปกรณ์
-  stock: Number,    // จำนวนคงเหลือ
-  image: String,    // เก็บ Base64 ของรูปภาพ
+  item_name: String,
   category: String,
+  stock_qty: Number,
+  unit: String, // เช่น อัน, กล่อง, ตัว
   updated_at: { type: Date, default: Date.now }
 });
+
+// 2. รายการคำขอเบิก
+const RequisitionSchema = new mongoose.Schema({
+  userId: String,
+  senderName: String,
+  item_id: mongoose.Schema.Types.ObjectId, // เชื่อมกับ ID ของในคลัง
+  item_name: String,
+  request_qty: Number,
+  status: { type: String, default: 'Pending' }, // Pending, Approved, Rejected
+  requested_at: { type: Date, default: Date.now },
+  approved_at: Date,
+  action_by: String
+});
+
 const Inventory = mongoose.model('Inventory', InventorySchema);
+const Requisition = mongoose.model('Requisition', RequisitionSchema);
 
 // --- 4. API Routes (Repairs) ---
 
@@ -138,6 +152,42 @@ app.put('/api/repairs/admin/:id', async (req, res) => {
     if (!updated) return res.status(404).json({ success: false });
 
     res.json({ success: true, data: updated });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// --- 5.1 API Route สำหรับ "อนุมัติการเบิกและตัดสต๊อก" ---
+
+app.put('/api/requisitions/approve/:id', async (req, res) => {
+  try {
+    const { id } = req.params; // ID ของใบคำขอเบิก (Requisition ID)
+
+    // 1. ค้นหาใบคำขอเบิกก่อน
+    const reqDoc = await Requisition.findById(id);
+    if (!reqDoc) return res.status(404).json({ success: false, message: 'Requisition not found' });
+    if (reqDoc.status === 'Approved') return res.status(400).json({ success: false, message: 'Already approved' });
+
+    // 2. อัปเดตสถานะใบเบิกเป็น Approved
+    reqDoc.status = 'Approved';
+    reqDoc.approved_at = new Date();
+    await reqDoc.save();
+
+    // 3. ตัดสต๊อกใน Inventory (ใช้ $inc เพื่อความแม่นยำ)
+    // หมายเหตุ: เราหาด้วย item_name หรือ item_id ตามที่พี่เก็บไว้
+    const inventoryUpdate = await Inventory.findOneAndUpdate(
+      { item_name: reqDoc.item_name }, // หรือ { _id: reqDoc.item_id }
+      { $inc: { stock_qty: -reqDoc.request_qty } }, // ลบจำนวนตามที่ขอ
+      { new: true }
+    );
+
+    res.json({
+      success: true,
+      message: 'Approved and Stock Updated',
+      data: reqDoc,
+      remaining_stock: inventoryUpdate ? inventoryUpdate.stock_qty : 'N/A'
+    });
+
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
