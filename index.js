@@ -7,7 +7,7 @@ const app = express();
 
 // 1. ตั้งค่า Middleware
 app.use(cors({
-  origin: ['https://helpdesk-frontend-amber.vercel.app', 'http://localhost:5173'], // เพิ่ม localhost ไว้เผื่อพี่รันเทส
+  origin: ['https://helpdesk-frontend-amber.vercel.app', 'http://localhost:5173'],
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   credentials: true
 }));
@@ -19,136 +19,168 @@ mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log('✅ Connected to MongoDB (it_fixit)'))
   .catch(err => console.error('❌ Connection Error:', err));
 
-// --- 3. ออกแบบ Schemas ---
 
-// งานแจ้งซ่อม
-const RepairSchema = new mongoose.Schema({
-  userId: String,
-  senderName: String,
-  problem_details: String,
-  status: { type: String, default: 'Pending' },
-  reported_at: { type: Date, default: Date.now },
-  accepted_at: Date,
-  completed_at: Date,
-  action_by: { type: String, default: 'Admin' }
-});
-const Repair = mongoose.model('Repair', RepairSchema);
+// ==========================================
+// 3. ออกแบบ Schemas (ให้ตรงกับตารางจริงเป๊ะๆ)
+// ==========================================
 
-// คลังอุปกรณ์ (Inventory)
+// 📦 1. คลังอุปกรณ์ (inventory_master)
 const InventorySchema = new mongoose.Schema({
-  name: String,      // ใช้ name ตามรูป DB
-  item_name: String, // เก็บไว้เผื่อเรียกใช้
+  itemName: String,
   category: String,
-  stock: Number,     // ใช้ stock ตามรูป DB
+  stock: Number,
   unit: String,
-  updated_at: { type: Date, default: Date.now }
-});
+  minStock: Number,
+  updatedAt: { type: Date, default: Date.now }
+}, { collection: 'inventory_master' });
 const Inventory = mongoose.model('Inventory', InventorySchema);
 
-// รายการคำขอเบิก (Requisition)
-const RequisitionSchema = new mongoose.Schema({
-  userId: String,
-  senderName: String,
-  item_id: mongoose.Schema.Types.ObjectId,
-  item_name: String,
-  quantity: Number,  // ใช้ quantity ตามรูป DB
-  status: { type: String, default: 'Pending' },
-  requested_at: { type: Date, default: Date.now },
-  approved_at: Date,
-  action_by: String
-});
-const Requisition = mongoose.model('Requisition', RequisitionSchema);
+// 🎫 2. ระบบตั๋วแจ้งซ่อม/เบิกของ (tickets) -> *ตารางใหม่ที่พี่ให้มา*
+const TicketSchema = new mongoose.Schema({
+  ticketNo: String,
+  category: String,
+  priority: String,
+  title: String,
+  description: String,
+  reporterId: String,  // จะตรงกับ lineUserId
+  status: { type: String, default: 'pending' },
+  createdAt: { type: Date, default: Date.now }
+}, { collection: 'tickets' });
+const Ticket = mongoose.model('Ticket', TicketSchema);
 
-// --- 4. API Routes (Repairs) ---
+// 👥 3. ข้อมูลผู้ใช้งาน (users) -> *ตารางใหม่ที่พี่ให้มา*
+const UserSchema = new mongoose.Schema({
+  lineUserId: String,
+  displayName: String,
+  firstName: String,
+  lastName: String,
+  department: String,
+  role: String,
+  active: { type: Boolean, default: true },
+  createdAt: { type: Date, default: Date.now }
+}, { collection: 'users' });
+const User = mongoose.model('User', UserSchema);
 
-app.get('/api/repairs', async (req, res) => {
-  try {
-    const allJobs = await Repair.find().sort({ reported_at: -1 });
-    res.json(allJobs);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
+// 📝 4. บันทึกการทำงาน (logs) -> *ตารางใหม่ที่พี่ให้มา*
+const LogSchema = new mongoose.Schema({
+  action: String,
+  description: String,
+  targetId: String,
+  performedBy: String,
+  timestamp: { type: Date, default: Date.now }
+}, { collection: 'logs' });
+const Log = mongoose.model('Log', LogSchema);
 
-app.post('/api/repairs', async (req, res) => {
-  try {
-    const newJob = new Repair(req.body);
-    await newJob.save();
-    res.status(201).json({ success: true, id: newJob._id });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
+// ⚙️ 5. ตั้งค่าระบบ (settings) -> *ตารางใหม่ที่พี่ให้มา*
+const SettingSchema = new mongoose.Schema({
+  systemName: String,
+  serviceStartTime: String,
+  serviceEndTime: String,
+  slaLimitMin: Number,
+  autoReplyOffDuty: String,
+  updatedBy: String
+}, { collection: 'settings' });
+const Setting = mongoose.model('Setting', SettingSchema);
 
-app.put('/api/repairs/admin/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { status } = req.body;
-    let updateData = { status, action_by: 'Admin' };
-    if (status === 'In Progress') updateData.accepted_at = new Date();
-    if (status === 'Resolved') updateData.completed_at = new Date();
-    const updated = await Repair.findByIdAndUpdate(id, updateData, { new: true });
-    res.json({ success: true, data: updated });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
+// (ถ้าพี่ยังใช้ repairs กับ requisitions อยู่ ผมคงไว้ให้นะครับ เผื่อ Dashboard เก่ายังเรียกใช้)
+const Requisition = mongoose.model('Requisition', new mongoose.Schema({
+  userId: String, senderName: String, itemName: String, quantity: Number,
+  status: String, requested_at: Date, approved_at: Date, action_by: String
+}, { collection: 'requisitions' }));
 
-// --- 5. API Routes (Inventory & Requisition) ---
+const Repair = mongoose.model('Repair', new mongoose.Schema({
+  userId: String, senderName: String, problem_details: String,
+  status: String, reported_at: Date, completed_at: Date, action_by: String
+}, { collection: 'repairs' }));
 
+
+// ==========================================
+// 4. API Routes (สำหรับให้ Dashboard ดึงข้อมูล)
+// ==========================================
+
+// 📦 API: ดึงสต๊อกทั้งหมด
 app.get('/api/inventory', async (req, res) => {
   try {
-    const items = await Inventory.find().sort({ updated_at: -1 });
+    const items = await Inventory.find().sort({ itemName: 1 });
     res.json(items);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.get('/api/requisitions', async (req, res) => {
+// 🎫 API: ดึงรายการตั๋วทั้งหมด (Tickets)
+app.get('/api/tickets', async (req, res) => {
   try {
-    const items = await Requisition.find().sort({ requested_at: -1 });
-    res.json(items);
+    const tickets = await Ticket.find().sort({ createdAt: -1 });
+    res.json(tickets);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// 🔥 หัวใจสำคัญ: อนุมัติและตัดสต๊อก
+// 👥 API: ดึงข้อมูล Users ทั้งหมด
+app.get('/api/users', async (req, res) => {
+  try {
+    const users = await User.find().sort({ createdAt: -1 });
+    res.json(users);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// 📝 API: ดึงข้อมูล Logs
+app.get('/api/logs', async (req, res) => {
+  try {
+    const logs = await Log.find().sort({ timestamp: -1 }).limit(100); // ดึงล่าสุด 100 รายการ
+    res.json(logs);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ⚙️ API: ดึงการตั้งค่าระบบ (Settings)
+app.get('/api/settings', async (req, res) => {
+  try {
+    const settings = await Setting.findOne(); // ดึงก้อนแรกมาใช้
+    res.json(settings);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// 🔥 API: อนุมัติการเบิก และ ตัดสต๊อก (อิงจาก Requisitions เดิม)
 app.put('/api/requisitions/approve/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { action_by } = req.body;
 
-    // 1. หาใบเบิก
     const reqDoc = await Requisition.findById(id);
     if (!reqDoc) return res.status(404).json({ success: false, message: 'ไม่พบรายการเบิก' });
-    if (reqDoc.status === 'Approved') return res.status(400).json({ success: false, message: 'รายการนี้อนุมัติไปแล้ว' });
+    if (reqDoc.status === 'Approved') return res.status(400).json({ success: false, message: 'อนุมัติไปแล้ว' });
 
-    // 2. คำนวณจำนวนที่จะตัด (ป้องกัน NaN)
     const deductAmount = Number(reqDoc.quantity) || 0;
 
-    // 3. อัปเดตสต๊อกในคลัง (หาด้วย name หรือ item_name)
     const inventoryUpdate = await Inventory.findOneAndUpdate(
-      { $or: [{ name: reqDoc.item_name }, { item_name: reqDoc.item_name }] },
-      { $inc: { stock: -deductAmount } },
+      { itemName: reqDoc.itemName },
+      { $inc: { stock: -deductAmount }, $set: { updatedAt: new Date() } },
       { new: true }
     );
 
-    if (!inventoryUpdate) {
-      console.log("⚠️ Inventory not found for name:", reqDoc.item_name);
-    }
+    if (!inventoryUpdate) return res.status(404).json({ success: false, message: 'ไม่พบสินค้าในคลัง' });
 
-    // 4. อัปเดตสถานะใบเบิก
     reqDoc.status = 'Approved';
     reqDoc.approved_at = new Date();
     reqDoc.action_by = action_by || 'Admin';
     await reqDoc.save();
 
-    res.json({
-      success: true,
-      message: 'อนุมัติและตัดสต๊อกเรียบร้อย',
-      remaining_stock: inventoryUpdate ? inventoryUpdate.stock : 'Unknown'
-    });
-
-  } catch (err) {
-    console.error("Error in Approval:", err);
-    res.status(500).json({ success: false, error: err.message });
-  }
+    res.json({ success: true, message: 'ตัดสต๊อกเรียบร้อย', current_stock: inventoryUpdate.stock });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
 });
 
-app.get('/', (req, res) => res.send('Helpdesk API is running...'));
+// API ของเดิม (Repairs & Requisitions)
+app.get('/api/repairs', async (req, res) => {
+  try { const jobs = await Repair.find().sort({ reported_at: -1 }); res.json(jobs); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
 
-// 6. Start Server
+app.get('/api/requisitions', async (req, res) => {
+  try { const items = await Requisition.find().sort({ requested_at: -1 }); res.json(items); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+
+app.get('/', (req, res) => res.send('🚀 Helpdesk API with All Modules is running...'));
+
+// 5. Start Server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
