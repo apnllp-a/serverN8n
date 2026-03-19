@@ -178,6 +178,31 @@ app.get('/api/requisitions', async (req, res) => {
   catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ➕ เพิ่มผู้ใช้งานใหม่
+app.post('/api/users', async (req, res) => {
+  try {
+    const newUser = new User(req.body);
+    await newUser.save();
+    res.json({ success: true, data: newUser });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// ✏️ แก้ไขข้อมูลผู้ใช้งาน
+app.put('/api/users/:id', async (req, res) => {
+  try {
+    const updatedUser = await User.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    res.json({ success: true, data: updatedUser });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
+// 🗑️ ลบผู้ใช้งาน
+app.delete('/api/users/:id', async (req, res) => {
+  try {
+    await User.findByIdAndDelete(req.params.id);
+    res.json({ success: true, message: 'ลบผู้ใช้งานเรียบร้อยแล้ว' });
+  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+});
+
 
 app.get('/', (req, res) => res.send('🚀 Helpdesk API with All Modules is running...'));
 
