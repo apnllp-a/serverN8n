@@ -1,6 +1,7 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const axios = require('axios'); // เพิ่มตัวนี้เพื่อคุยกับ LINE
 require('dotenv').config();
 
 const app = express();
@@ -12,101 +13,107 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // 2. เชื่อมต่อฐานข้อมูล
 mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log('✅ Connected to MongoDB (it_fixit)'))
   .catch(err => console.error('❌ Connection Error:', err));
 
-
 // ==========================================
-// 3. ออกแบบ Schemas (ให้ตรงกับตารางจริงเป๊ะๆ)
+// 3. Schemas (อ้างอิงตามโครงสร้างเดิมของพี่)
 // ==========================================
 
-// 📦 1. คลังอุปกรณ์ (inventory_master)
-const InventorySchema = new mongoose.Schema({
-  itemName: String,
-  category: String,
-  stock: Number,
-  unit: String,
-  minStock: Number,
-  updatedAt: { type: Date, default: Date.now }
-}, { collection: 'inventory_master' });
-const Inventory = mongoose.model('Inventory', InventorySchema);
-
-// 🎫 2. ระบบตั๋วแจ้งซ่อม/เบิกของ (tickets) -> *ตารางใหม่ที่พี่ให้มา*
-const TicketSchema = new mongoose.Schema({
-  ticketNo: String,
-  category: String,
-  priority: String,
-  title: String,
-  description: String,
-  reporterId: String,  // จะตรงกับ lineUserId
-  status: { type: String, default: 'pending' },
-  createdAt: { type: Date, default: Date.now }
-}, { collection: 'tickets' });
-const Ticket = mongoose.model('Ticket', TicketSchema);
-
-// 👥 3. ข้อมูลผู้ใช้งาน (users) -> *ตารางใหม่ที่พี่ให้มา*
-const UserSchema = new mongoose.Schema({
-  lineUserId: String,
+const User = mongoose.model('User', new mongoose.Schema({
+  lineUserId: { type: String, unique: true },
   displayName: String,
-  firstName: String,
-  lastName: String,
-  department: String,
-  role: String,
+  pictureUrl: String, // เพิ่มเก็บรูปโปรไฟล์
+  role: { type: String, default: 'user' }, // 'admin' หรือ 'user'
   active: { type: Boolean, default: true },
   createdAt: { type: Date, default: Date.now }
-}, { collection: 'users' });
-const User = mongoose.model('User', UserSchema);
+}, { collection: 'users' }));
 
-// 📝 4. บันทึกการทำงาน (logs) -> *ตารางใหม่ที่พี่ให้มา*
-const LogSchema = new mongoose.Schema({
-  action: String,
+const Ticket = mongoose.model('Ticket', new mongoose.Schema({
+  ticketNo: String,
+  category: String,
+  title: String,
   description: String,
-  targetId: String,
-  performedBy: String,
-  timestamp: { type: Date, default: Date.now }
-}, { collection: 'logs' });
-const Log = mongoose.model('Log', LogSchema);
+  reporterId: String,
+  status: { type: String, default: 'pending' },
+  createdAt: { type: Date, default: Date.now }
+}, { collection: 'tickets' }));
 
-// ⚙️ 5. ตั้งค่าระบบ (settings) -> *ตารางใหม่ที่พี่ให้มา*
-const SettingSchema = new mongoose.Schema({
-  systemName: String,
-  serviceStartTime: String,
-  serviceEndTime: String,
-  slaLimitMin: Number,
-  autoReplyOffDuty: String,
-  updatedBy: String
-}, { collection: 'settings' });
-const Setting = mongoose.model('Setting', SettingSchema);
-
-// (ถ้าพี่ยังใช้ repairs กับ requisitions อยู่ ผมคงไว้ให้นะครับ เผื่อ Dashboard เก่ายังเรียกใช้)
-const Requisition = mongoose.model('Requisition', new mongoose.Schema({
-  userId: String, senderName: String, itemName: String, quantity: Number,
-  status: String, requested_at: Date, approved_at: Date, action_by: String
-}, { collection: 'requisitions' }));
-
-const Repair = mongoose.model('Repair', new mongoose.Schema({
-  userId: String, senderName: String, problem_details: String,
-  status: String, reported_at: Date, completed_at: Date, action_by: String
-}, { collection: 'repairs' }));
-
+const Inventory = mongoose.model('Inventory', new mongoose.Schema({
+  itemName: String,
+  stock: Number,
+  unit: String
+}, { collection: 'inventory_master' }));
 
 // ==========================================
-// 4. API Routes (สำหรับให้ Dashboard ดึงข้อมูล)
+// 4. AUTH LOGIC (หัวใจสำคัญของ LINE Login)
 // ==========================================
 
-// 📦 API: ดึงสต๊อกทั้งหมด
-app.get('/api/inventory', async (req, res) => {
+app.post('/api/auth/line', async (req, res) => {
+  const { code } = req.body;
+
   try {
-    const items = await Inventory.find().sort({ itemName: 1 });
-    res.json(items);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    // A. แลก Code เป็น Access Token จาก LINE
+    const tokenResponse = await axios.post('https://api.line.me/oauth2/v2.1/token',
+      new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: code,
+        redirect_uri: `${process.env.FRONTEND_URL}/callback`, // ต้องตรงกับใน Console
+        client_id: process.env.LINE_CHANNEL_ID,
+        client_secret: process.env.LINE_CHANNEL_SECRET,
+      }).toString(),
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+    );
+
+    const { access_token } = tokenResponse.data;
+
+    // B. เอา Access Token ไปดึง Profile ของ User
+    const profileResponse = await axios.get('https://api.line.me/v2/profile', {
+      headers: { Authorization: `Bearer ${access_token}` }
+    });
+
+    const lineProfile = profileResponse.data; // { userId, displayName, pictureUrl }
+
+    // C. ตรวจสอบในฐานข้อมูลว่า User นี้มีสิทธิ์อะไร
+    let user = await User.findOne({ lineUserId: lineProfile.userId });
+
+    // ถ้าไม่มี User นี้ในระบบ (สมัครใหม่)
+    if (!user) {
+      user = new User({
+        lineUserId: lineProfile.userId,
+        displayName: lineProfile.displayName,
+        pictureUrl: lineProfile.pictureUrl,
+        role: 'user' // ค่าเริ่มต้นเป็น user ปกติ
+      });
+      await user.save();
+    }
+
+    // D. ส่งข้อมูลกลับไปให้ Frontend (ในที่นี้เราส่ง role ไปเช็คด้วย)
+    res.json({
+      success: true,
+      token: access_token, // หรือจะทำ JWT ของตัวเองก็ได้ครับ
+      role: user.role,
+      user: {
+        displayName: user.displayName,
+        pictureUrl: user.pictureUrl,
+        lineUserId: user.lineUserId
+      }
+    });
+
+  } catch (err) {
+    console.error('LINE Auth Error:', err.response?.data || err.message);
+    res.status(500).json({ success: false, message: 'การยืนยันตัวตนล้มเหลว' });
+  }
 });
 
-// 🎫 API: ดึงรายการตั๋วทั้งหมด (Tickets)
+// ==========================================
+// 5. API Routes สำหรับ Dashboard
+// ==========================================
+
+// ดึงตั๋ว (Tickets)
 app.get('/api/tickets', async (req, res) => {
   try {
     const tickets = await Ticket.find().sort({ createdAt: -1 });
@@ -114,7 +121,7 @@ app.get('/api/tickets', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// 👥 API: ดึงข้อมูล Users ทั้งหมด
+// ดึงข้อมูล User (เอาไว้จัดการสิทธิ์ Admin)
 app.get('/api/users', async (req, res) => {
   try {
     const users = await User.find().sort({ createdAt: -1 });
@@ -122,90 +129,25 @@ app.get('/api/users', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// 📝 API: ดึงข้อมูล Logs
-app.get('/api/logs', async (req, res) => {
+// อัปเดตสิทธิ์ User (เช่น เปลี่ยนจาก user เป็น admin)
+app.put('/api/users/:id/role', async (req, res) => {
   try {
-    const logs = await Log.find().sort({ timestamp: -1 }).limit(100); // ดึงล่าสุด 100 รายการ
-    res.json(logs);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ⚙️ API: ดึงการตั้งค่าระบบ (Settings)
-app.get('/api/settings', async (req, res) => {
-  try {
-    const settings = await Setting.findOne(); // ดึงก้อนแรกมาใช้
-    res.json(settings);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// 🔥 API: อนุมัติการเบิก และ ตัดสต๊อก (อิงจาก Requisitions เดิม)
-app.put('/api/requisitions/approve/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { action_by } = req.body;
-
-    const reqDoc = await Requisition.findById(id);
-    if (!reqDoc) return res.status(404).json({ success: false, message: 'ไม่พบรายการเบิก' });
-    if (reqDoc.status === 'Approved') return res.status(400).json({ success: false, message: 'อนุมัติไปแล้ว' });
-
-    const deductAmount = Number(reqDoc.quantity) || 0;
-
-    const inventoryUpdate = await Inventory.findOneAndUpdate(
-      { itemName: reqDoc.itemName },
-      { $inc: { stock: -deductAmount }, $set: { updatedAt: new Date() } },
-      { new: true }
-    );
-
-    if (!inventoryUpdate) return res.status(404).json({ success: false, message: 'ไม่พบสินค้าในคลัง' });
-
-    reqDoc.status = 'Approved';
-    reqDoc.approved_at = new Date();
-    reqDoc.action_by = action_by || 'Admin';
-    await reqDoc.save();
-
-    res.json({ success: true, message: 'ตัดสต๊อกเรียบร้อย', current_stock: inventoryUpdate.stock });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-// API ของเดิม (Repairs & Requisitions)
-app.get('/api/repairs', async (req, res) => {
-  try { const jobs = await Repair.find().sort({ reported_at: -1 }); res.json(jobs); }
-  catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.get('/api/requisitions', async (req, res) => {
-  try { const items = await Requisition.find().sort({ requested_at: -1 }); res.json(items); }
-  catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ➕ เพิ่มผู้ใช้งานใหม่
-app.post('/api/users', async (req, res) => {
-  try {
-    const newUser = new User(req.body);
-    await newUser.save();
-    res.json({ success: true, data: newUser });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
-});
-
-// ✏️ แก้ไขข้อมูลผู้ใช้งาน
-app.put('/api/users/:id', async (req, res) => {
-  try {
-    const updatedUser = await User.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const { role } = req.body;
+    const updatedUser = await User.findByIdAndUpdate(req.params.id, { role }, { new: true });
     res.json({ success: true, data: updatedUser });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// 🗑️ ลบผู้ใช้งาน
-app.delete('/api/users/:id', async (req, res) => {
+// ดึงสต๊อก
+app.get('/api/inventory', async (req, res) => {
   try {
-    await User.findByIdAndDelete(req.params.id);
-    res.json({ success: true, message: 'ลบผู้ใช้งานเรียบร้อยแล้ว' });
-  } catch (err) { res.status(500).json({ success: false, error: err.message }); }
+    const items = await Inventory.find().sort({ itemName: 1 });
+    res.json(items);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Health Check
+app.get('/', (req, res) => res.send('🚀 Helpdesk API (Railway) with LINE Login is running...'));
 
-app.get('/', (req, res) => res.send('🚀 Helpdesk API with All Modules is running...'));
-
-// 5. Start Server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
